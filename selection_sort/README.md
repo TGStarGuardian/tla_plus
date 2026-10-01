@@ -1,88 +1,87 @@
 # Selection sort
 
-`selection_sort.hpp` implements classic selection sort: scan the remaining
-suffix for its first minimum and exchange it with the first suffix element,
-skipping self-swaps. `SelectionSort.tla` separates starting a scan, each value
-comparison/minimum update, scan completion, and exchange.
+Selection sort u preostalom delu niza pronalazi prvi najmanji element i postavlja
+ga na početak tog dela. Posle svake iteracije još jedna pozicija je završena.
+Ako je minimum već na pravom mestu, zamena se preskače. Sortiranje nije stabilno.
 
-```cpp
-#include "selection_sort/selection_sort.hpp"
-#include <vector>
+## Datoteke i interfejs
 
-std::vector<int> values{3, -1, 3, 0};
-selection_sort::sort(values);
-```
+| Datoteka | Uloga |
+| --- | --- |
+| [selection_sort.hpp](selection_sort.hpp) | C++20 implementacija, `void selection_sort::sort(std::span<int>)` |
+| [SelectionSort.tla](SelectionSort.tla) | Koraci izbora i svojstva |
+| [SelectionSort.cfg](SelectionSort.cfg) | Redovna TLC konfiguracija |
+| [Unstable.cfg](Unstable.cfg) | Kontraprimer stabilnosti |
+| [../tests/sorts.cpp](../tests/sorts.cpp) | C++ provere |
 
-Run `make test` and
-`make selection-model TLA_TOOLS_JAR=/absolute/path/to/tla2tools.jar` from the
-repository root. See [shared verification conventions](../common/README.md)
-for identity semantics, complete results, and verification limitations.
+## Model i veza sa C++ kodom
 
-## General correctness argument
+Stanje modela dato je sledećim elementima:
 
-Use one-based indices here. Before processing position `i`, every position in
-`[1, i)` is already final: its value is at least every earlier value and at
-most every later value (`PrefixFinal`). Initially this prefix is empty.
+1. `original` je početni niz;
+2. `a` je trenutni niz početnih indeksa elemenata;
+3. `i` je pozicija koju trenutno popunjavamo minimumom;
+4. `cursor` je pozicija sledećeg kandidata za minimum;
+5. `minimum` je pozicija prvog najmanjeg elementa pronađenog do sada;
+6. `phase` je trenutna faza izvršavanja.
 
-Initialize `minimum = i` and `cursor = i + 1`. Throughout the scan, `minimum`
-is the first occurrence of a minimum value in `[i, cursor)` (`MinimumCorrect`).
-The claim holds for the initial one-element interval. A strictly smaller
-candidate becomes the new minimum; an equal or greater candidate leaves the
-minimum unchanged. Advancing the cursor therefore preserves the invariant,
-including the first-occurrence condition.
+Model prati sledeće korake C++ petlji:
 
-At scan completion, the minimum is at most every value in `[i, n]`. Exchanging
-it with position `i` makes that position final: the earlier prefix was already
-at most every suffix element, and the new value is at most every remaining
-suffix value. Earlier final positions remain final because this operation only
-permutes the suffix. Every swap preserves all identities and therefore all
-value multiplicities (`PreservesElements`). Incrementing `i` extends the final
-prefix. Once `i >= n`, all but possibly the last position are final, which
-forces the whole array to be sorted. Empty/singleton inputs are immediately done.
+1. `Init` postavlja početni raspored i kreće od prve pozicije;
+2. `Start` uzima element na `i` kao početni minimum i postavlja `cursor` iza njega;
+3. `Compare` poredi kandidata sa minimumom, menja minimum samo ako je kandidat
+   strogo manji i pomera `cursor`;
+4. `EndScan` završava pretragu kada više nema kandidata;
+5. `Exchange` zamenjuje elemente na `i` i `minimum`, ako su pozicije različite,
+   pa prelazi na sledeće `i`.
 
-## Why first-minimum selection is still unstable
+`Done` važi kada je preostao najviše jedan element. Prazan i jednočlani niz odmah
+su završeni. Pozicijama `i`, `cursor` i `minimum` odgovaraju C++ indeksi manji
+za jedan; C++ unutrašnja petlja koristi ime `j` umesto `cursor`.
 
-Label elements by their original identities:
+## Proveravana svojstva
+
+Svojstva koja se proveravaju su sledeća:
+
+1. `TypeOK` proverava dozvoljene vrednosti promenljivih i faza;
+2. `AccessSafety` proverava granice pretrage i da zamena sledi tek posle
+   pregledanja celog preostalog dela;
+3. `PreservesElements` proverava da nijedan početni element nije izgubljen ili
+   dodat;
+4. `MinimumCorrect` proverava da `minimum` pokazuje na prvo pojavljivanje
+   najmanje vrednosti u pregledanom delu;
+5. `PrefixFinal` proverava da su sve pozicije pre `i` već na svojim konačnim
+   mestima u sortiranom nizu;
+6. `SortedAtEnd` proverava da je niz sortiran kada važi `Done`;
+7. `Terminates` proverava da algoritam na kraju stigne do `Done`.
+
+Posebna konfiguracija `Unstable.cfg` proverava `StableAtEnd` i očekuje
+kontraprimer. Brojevi u indeksu prikazuju početni identitet elementa:
 
 ```text
-input:              1₁  1₂  0₃
-after first swap:   0₃  1₂  1₁
-final:              0₃  1₂  1₁
+ulaz:               1₁  1₂  0₃
+posle prve zamene:   0₃  1₂  1₁
+izlaz:              0₃  1₂  1₁
 ```
 
-Moving the original first element to the minimum's old position crosses an
-equal element. Choosing the first minimum cannot prevent this.
+Prvi element pri zameni prelazi preko jednakog elementa. Zato izbor prvog
+minimuma nije dovoljan da sortiranje bude stabilno.
 
-`Unstable.cfg` checks the deliberately false `StableAtEnd` invariant for
-`original = <<1, 1, 0>>`. Run:
+## Složenost
+
+Svaka iteracija pregleda ceo preostali deo. Ukupno ima `n(n-1)/2` poređenja,
+pa je vreme Θ(n²), čak i za već sortiran niz. Za neprazan niz izvršava se najviše
+`n-1` zamena. Dodatni prostor je O(1).
+
+## Pokretanje i rezultati provera
+
+Iz korena repozitorijuma:
 
 ```sh
-make selection-witness TLA_TOOLS_JAR=/absolute/path/to/tla2tools.jar
+make test
+make selection-model TLA_TOOLS_JAR=/apsolutna/putanja/do/tla2tools.jar
+make selection-witness TLA_TOOLS_JAR=/apsolutna/putanja/do/tla2tools.jar
 ```
 
-The target succeeds only when TLC finds the intended invariant violation. The
-verified trace reaches identity order `<<3, 2, 1>>` in 10 states. Normal
-`SelectionSort.cfg` does not assert stability and passes all of its properties.
-
-## Accesses, termination, and performance
-
-An active scan has `1 <= i < n`, `i <= minimum < cursor <= n + 1`. The candidate
-is read only when `cursor <= n`; the exchange uses valid `i` and `minimum`.
-The C++ empty-input guard precedes `size() - 1`, so unsigned subtraction is safe.
-Indices only advance to their upper bounds, and values are only compared/copied.
-
-For nonterminal states use `(max(0, n - i), V)` as a lexicographic rank: `V` is
-`n + 3` in `ready`, `n - cursor + 2` in `scan`, and zero in `swap`. Starting,
-comparing, and ending a scan strictly lower `V`; exchange increments `i` and
-lowers the first component. Every nonterminal state enables a step. This proves
-termination under the model's weak fairness assumption; the C++ loops execute
-the same finite sequence directly.
-
-There are exactly `n(n-1)/2` value comparisons and at most `max(0, n-1)` swaps.
-Runtime is Θ(n²), including on already sorted input. Extra space is O(1), with
-no allocation or recursion. This trades stability and adaptive runtime for a
-small number of writes.
-
-TLC checked 29,803 distinct states for normal safety and termination, separately
-from the expected-failure stability witness. The argument above covers arbitrary
-finite integer arrays.
+Zajedničke definicije, opseg provera i način pokretanja opisani su u
+[zajedničkoj dokumentaciji](../common/README.md).

@@ -1,210 +1,104 @@
 # Quicksort
 
-An in-place C++20 quicksort and a TLA+ model of the same three-way partition
-algorithm. The equal-to-pivot block reaches its final sorted positions **after
-a complete partition**, not after a single comparison or swap.
+Quicksort bira pivot i deli niz na vrednosti manje od njega, jednake njemu i
+veće od njega. Jednaki deo je tada na konačnim sortiranim pozicijama. Preostala
+dva dela obrađuju se na isti način. C++ implementacija rekurzivno obrađuje manji
+deo, a veći nastavlja petljom. Sortiranje nije stabilno.
 
-## Files and use
+## Datoteke i interfejs
 
-- `quicksort.hpp`: integer sorting API and partition implementation.
-- `Partition.tla`: partition invariant and steps; shared sequence properties
-  live in `../common/SortProperties.tla`.
-- `Quicksort.tla`: pivot choice, partition execution, and remaining work.
-- `Quicksort.cfg`: bounded safety and termination checks.
-- `test.cpp`: executable checks against `std::sort` and partition contracts.
+| Datoteka | Uloga |
+| --- | --- |
+| [quicksort.hpp](quicksort.hpp) | Javni API, particija i sortiranje |
+| [Partition.tla](Partition.tla) | Invarijanta i koraci particije |
+| [Quicksort.tla](Quicksort.tla) | Izbor pivota, izvršavanje particije i preostali posao |
+| [Quicksort.cfg](Quicksort.cfg) | Invarijante i terminacija za konačan domen |
+| [test.cpp](test.cpp) | Izvršive provere sortiranja i ugovora particije |
 
-```cpp
-#include "quicksort/quicksort.hpp"
-#include <vector>
+## Model i veza sa C++ kodom
 
-std::vector<int> values{3, -1, 3, 0};
-std::mt19937 random(42);  // Explicit seed for reproducibility.
-quicksort::sort(values, random);
-```
+Stanje modela dato je sledećim elementima:
 
-The API accepts `std::span<int>`, including an empty span. It mutates the supplied
-storage and uses a caller-owned generator. `detail::partition` requires a valid
-nonempty range and a pivot index inside it. The public sorter establishes these
-preconditions. This is an unstable sort: equal elements have no identity/order
-guarantee.
+1. `original` je početni niz;
+2. `a` je trenutni niz vrednosti;
+3. `pending` je niz podintervala koji još čekaju obradu;
+4. `fixed` je skup pozicija koje su već završene;
+5. `phase` razlikuje čekanje zadatka (`idle`), particionisanje (`scan`) i
+   završenu particiju (`split`);
+6. `lo` i `hi` ograničavaju podinterval koji se obrađuje, pri čemu `hi` ne pripada
+   tom podintervalu;
+7. `lt` označava kraj dela sa manjim vrednostima i početak jednakog dela;
+8. `scan` je sledeća pozicija čiju vrednost treba razvrstati;
+9. `gt` označava početak dela sa većim vrednostima;
+10. `pivot` je kopirana vrednost izabrana iz tekućeg podintervala.
 
-## Run checks
+Model prati sledeće korake C++ implementacije:
 
-From the repository root, with GCC (or Clang), Java, and a TLA+ tools JAR:
+1. `Init` postavlja ceo niz kao prvi zadatak, osim ako ima najviše jedan element;
+2. `Start` uzima sledeći zadatak, bira pivot i postavlja granice particije;
+3. `Scan` izvršava jednu iteraciju particionisanja pomoću `PartitionStep` iz
+   `Partition.tla`;
+4. `Finish` označava jednaki blok kao završen i stavlja manji pa veći preostali
+   deo na početak `pending`; prazni delovi se preskaču, a jednočlani odmah završavaju.
+
+Jedan korak `Scan` ima tri mogućnosti:
+
+1. ako je element manji od pivota, zamenjuje se sa elementom na `lt`, pa se
+   povećavaju `lt` i `scan`;
+2. ako je veći, smanjuje se `gt` i vrši zamena sa tom pozicijom; `scan` ostaje
+   na mestu jer pristigli element tek treba razvrstati;
+3. ako je jednak pivotu, samo se povećava `scan`.
+
+Kada `scan` stigne do `gt`, nema više nerazvrstanih elemenata i sledi `Finish`.
+`Done` važi kada nema ni aktivne particije ni preostalih zadataka.
+
+C++ granice i pokazivači manji su za jedan od modelovih. `pending` predstavlja
+redosled poslova koji u C++ kodu nastaje iz rekurzivnih poziva i petlje; `fixed`
+postoji samo radi provere. C++ prima generator `std::mt19937&` i bira nasumičan
+indeks pivota. Model bira nedeterministički, pa TLC razmatra sve modelovane izbore
+bez dodeljivanja verovatnoća.
+
+## Proveravana svojstva
+
+Svojstva koja se proveravaju su sledeća:
+
+1. `TypeOK` proverava dozvoljene vrednosti promenljivih i faza;
+2. `PreservesValues` proverava da niz ima iste vrednosti i isti broj njihovih
+   pojavljivanja kao na početku;
+3. `Separated` proverava da vrednosti pre nezavršenog podintervala nisu veće
+   od njegovih vrednosti, a vrednosti posle njega nisu manje;
+4. `WorkCoverage` proverava da nezavršeni podintervali i završene pozicije
+   pokrivaju ceo niz bez preklapanja;
+5. `PartitionCorrect` proverava granice i raspored: manji elementi su pre `lt`,
+   jednaki između `lt` i `scan`, neobrađeni između `scan` i `gt`, a veći od `gt`
+   do `hi`; pivot ostaje prisutan u tekućem podintervalu;
+6. `AccessSafety` proverava da se pri razvrstavanju pristupa postojećim
+   pozicijama i da su `scan` i `gt` jednaki nakon particije;
+7. `PivotFinal` proverava da je posle cele particije jednaki blok neprazan i da
+   su njegove vrednosti već na konačnim sortiranim pozicijama;
+8. `FixedFinal` proverava da sve označene završene pozicije ostaju konačne;
+9. `SortedAtEnd` proverava da je ceo niz sortiran kada važi `Done`;
+10. `Terminates` proverava da algoritam na kraju stigne do `Done`.
+
+## Složenost
+
+Particionisanje podintervala dužine `m` zahteva O(m) vremena. Uz uniforman izbor
+indeksa pivota očekivano vreme sortiranja je O(n log n). Uz stalno nepovoljne
+pivote može biti O(n²). Ako su sve vrednosti jednake, dovoljna je jedna linearna
+particija. TLC ne proverava očekivanu vremensku složenost.
+
+Rekurzivno se obrađuje samo manji deo, koji ima najviše polovinu preostalih
+elemenata. Zato dubina steka iznosi O(log(n+1)) i pri nepovoljnim pivotima.
+Po pozivu se čuva nekoliko indeksa i pivot; nema pomoćnog niza.
+
+## Pokretanje i rezultati provera
+
+Iz korena repozitorijuma:
 
 ```sh
-g++ -std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Wconversion \
-    -fsanitize=address,undefined -fno-omit-frame-pointer \
-    quicksort/test.cpp -o /tmp/tla-quicksort-test
-/tmp/tla-quicksort-test
-
-export TLA_TOOLS_JAR=/absolute/path/to/tla2tools.jar
-cd quicksort
-java -DTLA-Library=../common -XX:+UseParallelGC -Xmx2g -cp "$TLA_TOOLS_JAR" tlc2.TLC \
-    -workers 2 -metadir /tmp/tla-quicksort-states \
-    -config Quicksort.cfg Quicksort.tla
+make test
+make quicksort-model TLA_TOOLS_JAR=/apsolutna/putanja/do/tla2tools.jar
 ```
 
-Keep assertions enabled in the test build. For an optimized consumer build, use
-`-O3`; the sorter itself does not depend on assertions or sanitizers. The JAR
-bundled with the installed VS Code TLA+ extension also works.
-
-`MaxLen` controls exhaustive input length. `Elements` is overridden by the
-`ModelElements` operator because TLC configuration literals do not accept
-negative integers directly. Adjust that operator to change the finite domain.
-
-Checked on 2026-10-01 with GCC 13.3.0, Java 21, and TLC 2026.10.01.024053:
-
-- C++: 9,841 inputs of lengths 0–8 over `{-1, 0, 1}`, each sorted with three
-  seeds; every nonempty subrange and pivot index for lengths 0–6; integer limits;
-  and 100,000-element equal, ascending, descending, and pseudorandom inputs.
-  AddressSanitizer and UndefinedBehaviorSanitizer reported no errors.
-- TLC: all 1,093 inputs of lengths 0–6 over `{-1, 0, 1}` and all possible pivot
-  values at every partition. It generated 64,835 states, found 49,719 distinct
-  states, and completed every configured invariant and termination check with
-  no errors. Search depth was 22. TLC uses state fingerprints; its reported
-  optimistic collision estimate for this run was approximately `4.1e-11`.
-
-## Model and correspondence
-
-Both implementations use half-open intervals `[lo, hi)`. C++ indices are
-zero-based; TLA+ sequence indices are one-based. Add one to every C++ boundary
-or cursor to obtain its TLA+ counterpart. Values are unchanged.
-
-| C++ operation | TLA+ operation |
-| --- | --- |
-| Uniform pivot index, then copy its value | `Start` nondeterministically chooses an index and copies `a[p]` |
-| One partition-loop iteration | `Scan`, using `PartitionStep` |
-| Return `[lt, gt)` | Reach phase `"split"` |
-| Recurse into smaller side, then iterate over larger | `Finish` prepends the smaller task, then the larger task, to `pending` |
-| Return immediately for length 0 or 1 | Omit empty tasks and mark singleton indices fixed |
-
-Equal-valued pivot indices yield identical model states; merging them loses no
-array behavior. A pivot is a copied **value**, not a tracked element identity.
-The model does not represent the generator or its probabilities.
-
-`pending` represents continuations of suspended C++ calls and the next range to
-sort. It omits trivial calls and function returns. `original` and `fixed` are
-proof bookkeeping, absent from C++. The model's explicit sequence, copies, and
-unbounded integers describe behavior rather than implementation memory costs.
-This is an explained correspondence, not a machine-checked C++ refinement proof.
-
-## General correctness argument
-
-The following induction and termination arguments apply to any finite sequence
-of integers, independently of the configured TLC bound. They are mathematical
-proofs in prose; no TLAPS proof is claimed.
-
-### Partition invariant and accesses
-
-During partitioning, maintain
-
-```text
-lo <= lt <= scan <= gt <= hi
-[lo, lt)    < pivot
-[lt, scan)  = pivot
-[scan, gt)  unclassified
-[gt, hi)    > pivot
-```
-
-The active interval contains at least one occurrence of the pivot. Initially
-`lt = scan = lo`, `gt = hi`, and the pivot was copied from inside the interval.
-All three classified regions are empty, so the invariant holds.
-
-When `scan < gt`, `lt`, `scan`, and `gt - 1` are valid indices in the active
-interval. Consider the three branches:
-
-1. If `a[scan] < pivot`, swap it with `a[lt]` and increment both cursors. When
-   `lt < scan`, the displaced value equals the pivot; when `lt = scan`, the swap
-   is a self-swap. In both cases the smaller region grows by one and the equal
-   region remains correct.
-2. If `a[scan] > pivot`, decrement `gt` and swap with that index. The greater
-   region grows by one. Keep `scan` unchanged because the incoming value has
-   not yet been classified, unless the unknown region has just become empty.
-3. Otherwise increment `scan`, extending the equal region.
-
-Each step decreases `gt - scan` by exactly one. Swaps preserve multiplicities
-and leave everything outside the interval unchanged, so a pivot occurrence
-remains. Thus a partition of length `m` takes exactly `m` loop iterations.
-
-At exit `scan = gt`. The unknown region is empty, and the existing pivot
-occurrence must lie in `[lt, gt)`, so `lt < gt`. The interval is now partitioned
-into strictly smaller, equal, and strictly greater blocks.
-
-### Final pivot positions and the complete sort
-
-Maintain these outer invariants (expressed as `WorkCoverage`, `Separated`, and
-`FixedFinal`): unfinished intervals and fixed indices disjointly cover the
-array; every value before an unfinished interval is at most every value inside
-it, and every value inside is at most every value after it; every fixed index
-is ordered relative to all earlier and later indices.
-
-Initially there is either one whole-array task, for which separation is
-vacuous, or an empty/singleton array whose indices are already fixed. A partition
-only permutes values inside one unfinished interval, preserving its separation
-from the outside and all previous fixed positions.
-
-On partition completion, an equal-block value is at least every earlier value
-and at most every later value: the partition invariant handles the active
-interval and separation handles everything outside it. This is `PivotFinal`.
-Consequently these are final sorted positions. With duplicates, this statement
-concerns values and indices rather than a unique identity for each occurrence.
-
-Replacing the parent interval with its two strict children preserves separation
-and disjoint coverage. Its nonempty equal block becomes fixed; singleton
-children are also already final, and empty children contribute no work. All
-future swaps stay inside unfinished intervals, so fixed values never move.
-
-Every transition either swaps values or leaves the array unchanged, proving
-`PreservesValues`. Once no unfinished work remains, coverage makes every index
-fixed, proving `SortedAtEnd`. Therefore the result is a sorted permutation of
-the input. Empty arrays and singleton arrays satisfy this immediately.
-
-### Termination
-
-Let `n` be the original length and `U` the sum of lengths of all unfinished
-intervals, including an active partition. Define a secondary natural measure:
-
-```text
-V = n + 2          in phase idle
-V = gt - scan + 1  in phase scan
-V = 0              in phase split
-```
-
-Every nonterminal transition strictly decreases the lexicographic pair `(U,V)`:
-`Start` preserves `U` and lowers `V`; `Scan` preserves `U` and lowers `V`;
-`Finish` strictly lowers `U` by removing a nonempty equal block (and any
-singleton children). This order on pairs of natural numbers is well-founded.
-Each nonterminal reachable state enables a transition. TLA+ allows stuttering,
-so `WF_vars(Next)` requires eventual progress whenever work remains; hence
-`Terminates`, or `<>Done`. The fairness condition concerns scheduling only:
-correctness and termination require no fair distribution of pivot choices.
-
-C++ executes these steps directly. Its unsigned subtractions cannot underflow
-under the interval invariant. Cursor increments stop at the exclusive upper
-bound, and array values are only compared or copied, including `INT_MIN` and
-`INT_MAX`.
-
-## Performance argument
-
-A partition costs O(m) time and O(1) extra storage. With distinct values and
-repeated extreme pivots, remaining sizes can be `m-1, m-2, ...`, giving O(n²)
-worst-case time. An all-equal input takes one linear partition.
-
-For expected time, assume each pivot index is chosen uniformly conditional on
-the current interval, as in the usual idealized randomized quicksort analysis.
-Fix an arbitrary ordering among equal values for analysis. A middle-half rank
-is chosen with probability at least one half, up to harmless rounding for small
-intervals. Such a pivot leaves both strict children of size at most about
-three quarters of the parent; grouping equal values can only shrink them.
-For any particular element, the expected wait for each such shrink is constant,
-and O(log n) shrinks suffice until it becomes fixed. Charging each partition's
-linear cost to its elements therefore gives O(n log n) expected total time.
-The C++ implementation uses `uniform_int_distribution` with `mt19937`; a fixed
-seed determines a particular execution, and the idealized expectation is not
-a worst-case guarantee for that seed. TLC establishes no probabilistic bound.
-
-The recursive child has size at most `floor((m-1)/2)` because the equal block is
-nonempty. Each deeper C++ call thus at least halves the size; the larger side
-runs in the current frame. Stack space is O(log(n+1)) for **every** pivot
-sequence, with O(1) extra storage per frame and no auxiliary array allocation.
+Zajedničke definicije, opseg provera i način pokretanja opisani su u
+[zajedničkoj dokumentaciji](../common/README.md).

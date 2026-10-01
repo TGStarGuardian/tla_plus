@@ -1,104 +1,59 @@
-# Shared verification conventions
+# Zajedničke definicije i provere
 
-`SortProperties.tla` contains sequence swaps, multiplicities, sortedness, final
-positions, and properties for original-index identities. Algorithm transitions
-stay in their own modules. Quicksort uses plain values; the other five models
-use identities to make stability observable.
+[SortProperties.tla](SortProperties.tla) sadrži svojstva nizova koja koriste
+modeli svih šest algoritama. Prelazi algoritama definisani su u njihovim
+zasebnim modulima. Pregled projekta nalazi se u [glavnom README-u](../README.md).
 
-## Identities and live data
+## Definicije
 
-`original` is an immutable sequence of input values. Identity `k` means the
-element originally at position `k`, and its value is `original[k]`. Initially
-`a = <<1, 2, ..., n>>`. `Keys(a, original)` projects identities back to the
-integer array manipulated by C++. `Stable` requires equal-valued elements to
-occur in increasing original-index order. `Before` orders identities by value,
-then original index; it is used to characterize a correct stable merge prefix.
+| Operator | Značenje |
+| --- | --- |
+| `Indices(lo, hi)` | Indeksi poluotvorenog intervala `[lo, hi)` |
+| `Swap(a, i, j)` | Niz dobijen zamenom elementa na indeksu `i` sa elementom na indeksu `j` |
+| `Values(a)`, `Count(a, v)` | Skup vrednosti niza i broj pojavljivanja svake vrednosti |
+| `Permutation(a, b)` | Niz `a` je permutacija niza `b` ako i samo ako su jednake dužine i imaju iste vrednosti isti broj puta |
+| `Sorted(a)` | Uslov da je `a` sortiran, što znači da je uređen neopadajućim poretkom |
+| `FinalAt(a, k)` | Element na indeksu `k` je na svojoj pravoj poziciji nakon sortiranja |
+| `Min(x, y)` | Izraz koji vraća `x` ako je on manji od `y`, a inače vraća `y` |
+| `Identity(n)` | Niz elemenata `1, 2, 3, ..., n` |
+| `Keys(order, original)` | `order` skladišti permutovani niz indeksa od `original`, a ovo je niz koji se dobija kada se indeksi od `original` permutuju u skladu sa `order` |
+| `KeySorted(order, original)` | Uslov da je `original` permutovan u skladu sa `order` sortiran |
+| `Stable(order, original)` | Uslov da je niz `original` stabilan u odnosu na `order` |
+| `StableSorted(order, original)` | Uslov da je niz stabilan u odnosu na `order` i da je sortiran |
+| `Before(x, y, original)` | Uslov da su elementi na indeksima `x` i `y` sortirani |
+| `RunsSorted(order, original, width)` | Uslov koji tvrdi da su uzastopni blokovi dužine `width` stabilno sortirani, uz mogućnost da je poslednji blok kraći od `width` |
 
-`Permutation(Live, Identity(n))` proves every identity occurs exactly once in
-the logical live data. This implies preservation of value multiplicities,
-including duplicates. During insertion shifts and heap repair, `Live` fills
-the temporary hole with the saved key/value. During merge copy-back, it uses the completed buffer chunk
-instead of the partially overwritten array. At completed-operation boundaries,
-`Live = a`, so the array itself is a permutation again.
+## Šta smo testirali
 
-These identities, input snapshots, and `Live` expressions are proof bookkeeping;
-they add no C++ storage. The C++ APIs remain `void sort(std::span<int>)`, except
-quicksort, which also accepts its random generator. Erasing identities and
-replacing them by their values explains the correspondence. This is not a
-machine-checked refinement proof of C++. In particular, integer-only C++ tests
-cannot observe relative identities of equal values; stability is checked in
-the models and justified by the corresponding comparison/write logic.
+Proverili smo algoritme za sve nizove dužine od 0 do 6 nad skupom `{-1, 0, 1}`.  Takvih nizova ima ukupno 1093. Time su obuhvaćeni prazan niz, jednočlani nizovi,
+negativne vrednosti i ponavljanja.
+Quicksort istražuje i sve izbore pivota.
 
-## Scope and progress
+## Reprodukcija
 
-Each normal configuration checks all 1,093 input arrays of lengths 0–6 over
-`{-1, 0, 1}`, including empty, singleton, negative, and duplicate cases. Quicksort
-also explores every pivot choice. All configurations check termination as well
-as the listed invariants. `MaxLen` and `ModelElements` control the finite input
-domain; the latter is an operator override because negative numbers cannot be
-written directly as TLC configuration literals.
-
-TLA+ allows stuttering, so each `Spec` includes weak fairness of `Next` to require
-eventual execution when work remains. No algorithm relies on a particular
-scheduler or, for quicksort correctness, a particular pivot distribution.
-Completed states can stutter forever and satisfy `<>Done`.
-
-TLC results establish bounded model checking, with the usual state-fingerprint
-collision qualification. The mathematical proofs in the algorithm READMEs
-apply to arbitrary finite integer arrays. No machine-checked general/TLAPS
-proof, probabilistic model-checking result, or C++ compiler proof is claimed.
-C++ integer values are bounded by `int`; TLA+ integers are unbounded. Values are
-only copied and compared, while safe index arithmetic is explained per algorithm.
-
-## Reproduce
-
-From the repository root, using C++20, GNU Make, Bash, Java, and a TLA+ tools JAR:
+Iz korena repozitorijuma, uz C++20 kompilator sa sanitizatorima, GNU Make, Bash,
+Java i TLA+ tools JAR:
 
 ```sh
 make test
-make models TLA_TOOLS_JAR=/absolute/path/to/tla2tools.jar
-make selection-witness heap-witness TLA_TOOLS_JAR=/absolute/path/to/tla2tools.jar
-# Or run all checks:
-make check TLA_TOOLS_JAR=/absolute/path/to/tla2tools.jar
+make models TLA_TOOLS_JAR=/apsolutna/putanja/do/tla2tools.jar
+make selection-witness heap-witness TLA_TOOLS_JAR=/apsolutna/putanja/do/tla2tools.jar
+# Sve provere:
+make check TLA_TOOLS_JAR=/apsolutna/putanja/do/tla2tools.jar
 ```
 
-Individual model targets are `quicksort-model`, `insertion-model`,
-`selection-model`, `merge-model`, `bubble-model`, and `heap-model`. The Makefile sets `TLA-Library` to the
-shared module directory. For a direct Java invocation or IDE configuration,
-include `-DTLA-Library=/absolute/path/to/this/repo/common` among JVM options.
+Pojedinačni ciljevi su `quicksort-model`, `insertion-model`, `selection-model`,
+`merge-model`, `bubble-model` i `heap-model`. `Makefile` postavlja `TLA-Library`
+na direktorijum `common`. Za neposredno pokretanje Java komandom ili kroz IDE
+potrebna je JVM opcija `-DTLA-Library=/apsolutna/putanja/do/repozitorijuma/common`.
 
-Binaries and TLC logs go to `/tmp/tla-plus-checks` by default. To change this,
-set `BUILD_DIR` to another absolute path. Tests keep assertions enabled and
-use AddressSanitizer and UndefinedBehaviorSanitizer. Header consumers can build
-with `-O3` without the test instrumentation.
+Programi i TLC dnevnici podrazumevano se smeštaju u `/tmp/tla-plus-checks`.
+`BUILD_DIR` omogućava izbor druge apsolutne putanje. C++ testovi koriste aktivne
+asercije, AddressSanitizer i UndefinedBehaviorSanitizer; prevodilac se bira
+parametrom `CXX`. Za korišćenje zaglavlja van testova može se koristiti `-O3`.
 
-`selection-witness` and `heap-witness` deliberately ask TLC to check false
-stability invariants.
-The Make target succeeds only if TLC exits with invariant-violation code 12 and
-reports `StableAtEnd`; a tool/setup error will fail the target. The trace is
-saved as `selection-witness.log` or `heap-witness.log`. This is separate from normal safety checks.
-
-## Validation record
-
-Checked on 2026-10-01 using GCC 13.3.0, Java 21, and TLC 2026.10.01.024053:
-
-| Model | Generated states | Distinct states | Search depth | Result |
-| --- | ---: | ---: | ---: | --- |
-| Quicksort (shared-module regression) | 64,835 | 49,719 | 22 | All checks passed |
-| Insertion sort | 26,249 | 25,156 | 40 | All checks passed, including stability |
-| Selection sort | 30,896 | 29,803 | 31 | All normal checks passed |
-| Merge sort | 70,442 | 69,349 | 70 | All checks passed, including stability |
-| Bubble sort | 37,016 | 35,923 | 53 | All checks passed, including stability |
-| Heap sort | 51,257 | 50,164 | 64 | All normal checks passed |
-| Heap instability witness | 10 | 10 | 10 | Expected `StableAtEnd` violation |
-| Selection instability witness | 10 | 10 | 10 | Expected `StableAtEnd` violation |
-
-The respective optimistic fingerprint collision estimates for the six normal
-runs were `4.1e-11`, `1.5e-12`, `1.8e-12`, `4.1e-12`, `2.1e-12`, and `3.0e-12`.
-
-C++ checks passed for all six implementations without sanitizer errors. Each
-deterministic algorithm sorted all 9,841 arrays of lengths 0–8 over `{-1, 0, 1}`, both as
-whole arrays and as subspans surrounded by untouched sentinels. Additional
-checks cover integer limits, equal/sorted/reversed/random arrays through 2,048
-elements, and merge/heap-sort sizes 65,535, 65,536, 65,537, and 100,000. Quicksort's
-existing exhaustive, partition, and large-input checks also passed.
+Ciljevi `selection-witness` i `heap-witness` namerno proveravaju netačno svojstvo
+`StableAtEnd`. Uspevaju samo ako TLC vrati kod 12 i prijavi upravo narušavanje
+te invarijante; greška alata ne predstavlja uspešnu proveru. Tragovi su u
+`selection-witness.log` i `heap-witness.log`. Redovne konfiguracije ova dva
+algoritma ne zahtevaju stabilnost.
